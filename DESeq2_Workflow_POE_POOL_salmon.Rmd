@@ -1,0 +1,349 @@
+---
+title: DESeq2 - RNA-seq Epilepsy project
+---
+
+# Load required libraries
+```{r}
+
+# Required Packages
+library("GenomeInfoDb")
+library("GenomicFeatures")
+library("Rsamtools")
+library("GenomicAlignments")
+library("DESeq2")
+library("biomaRt")
+library("gplots")
+library("RColorBrewer")
+library("genefilter")
+library("ggplot2")
+library("plyr")
+library("dplyr")
+library("pheatmap")
+library("vsn")
+library("ggbeeswarm")
+library("ReportingTools")
+library("AnnotationDbi")
+library("org.Mm.eg.db")
+library("Gviz")
+library("sva")
+library("xml2")
+library("hexbin")
+
+```
+# Setup
+
+# Input file comes from Salmon pipeline
+
+# Match Transcript IDs to Gene IDs --> Merge Gene IDs: Sum counts
+```{r}
+
+PROJECT_PATH = '/Users/John/Documents/John'
+setwd(PROJECT_PATH)
+toMergeCounts = 'salmon_toMergeJS.csv'
+salmonIDs <- read.csv(toMergeCounts)
+
+#-------------------------------
+# TPM: remove counts less than 1. Can do this through excel as well
+#-------------------------------
+#quant <- read.csv('quant_TPM.csv')
+#nrow(quant)
+#quant <- quant[rowSums(quant[,-1]) > 1,]
+#nrow(quant)
+#write.table(quant, file = "quant_TPM_noZeros.csv", sep=",", quote = FALSE, row.names = FALSE)
+#TPM <- read.csv('salmon_TPM.csv')
+
+#--------------------------------------------------------------------------
+
+
+# Add gene names
+# mmusculus_gene_ensembl Mus musculus genes (GRCm38.p4) GRCm38.p4
+ensembl <- useMart(dataset = "mmusculus_gene_ensembl", biomart = "ensembl")
+
+# "ensembl_gene_id"
+genemap <- getBM(attributes = c("ensembl_gene_id","ensembl_transcript_id", "ensembl_transcript_id_version","external_gene_name", "external_transcript_name"), filters = "ensembl_transcript_id", values = salmonIDs$transcript_ID, mart = ensembl)
+
+idx <- match(salmonIDs$transcript_ID, genemap$ensembl_transcript_id)
+salmonIDs$gene_ID <- genemap$ensembl_gene_id[ idx ]
+salmonIDs$gene_name <- genemap$external_gene_name[ idx ]
+salmonIDs$ensembl_transcript_id_version <- genemap$ensembl_transcript_id_version[ idx ]
+salmonIDs$external_transcript_name <- genemap$external_transcript_name[ idx ]
+
+write.table(salmonIDs, file = "salmonIDs_toEdit.csv", sep=",", quote = FALSE, row.names = FALSE)
+
+
+##stop here.
+##change first column. Cut the gene id column in excel. Also, sort. Check for rows with NAs. save as edited. 
+```
+
+```{r}
+IDsFixed <- read.csv('salmonIDs_Edited.csv')
+# merge counts by gene_ID
+MergedCounts <- ddply(IDsFixed, "gene_ID", numcolwise(sum))
+write.table(MergedCounts, file = "merged_toRound.csv", sep=",", quote = FALSE, row.names = FALSE)
+
+
+```
+# Workflow - Part 2: from count matrices with salmon 'quant.sf' results
+```{r}
+
+# setup
+PROJECT_PATH = '/Users/John/Documents/John'
+setwd(PROJECT_PATH)
+ANNOTATION_METADATA = 'DESeq2_POE_data_notreat.csv'
+roundedCounts <- 'merged_rounded_notreat.csv'
+gene_IDs = 'gene_IDs.csv'
+DATAset = "v91"
+
+# Load metadata file with sample info
+sampleTable <- read.csv(ANNOTATION_METADATA)
+colData <- DataFrame(sampleTable)
+
+### Starting from count matrices
+countdata <- read.csv(roundedCounts)
+IDs <- read.csv(gene_IDs)
+
+# add gene names to count data
+rownames(countdata) <- IDs$gene_ID
+
+
+####This here is the model!! Very important!! doing only genotype to start.
+
+dds <- DESeqDataSetFromMatrix(countData = countdata, colData = colData, design = ~ Genotype)
+
+```
+# Exploratory analysis and visualization
+```{r}
+
+#Pre-filtering
+nrow(dds)
+dds <- dds[rowSums(counts(dds)) > 1,]
+nrow(dds)
+
+
+# The rlog and variance stabilizing transformations
+lambda <- 10^seq(from = -1, to = 2, length = 1000)
+cts <- matrix(rpois(1000*100, lambda), ncol = 100)
+pdf("DESeq2_meanSdplot.pdf", h=8.5, w=11)
+meanSdPlot(cts, ranks = FALSE)
+dev.off()
+# log-transformed
+log.cts.one <- log2(cts + 1)
+pdf("DESeq2_logtmeanSdplot.pdf", h=8.5, w=11)
+meanSdPlot(log.cts.one, ranks = FALSE)
+dev.off()
+
+# rlog Transformed Data
+## -- note: fitType='parametric', but the dispersion trend was not well captured by the function: y = a/x + b, and a local regression fit was automatically substituted. specify fitType='local' or 'mean' to avoid this message next time. ##
+rld <- rlog(dds, blind = FALSE) # Default - blind=TRUE (unsupervised)
+head(assay(rld), 3)
+rld.matrix <- as.matrix(assay(rld))
+write.table(rld.matrix, file = paste("DESeq2_rlog_data_",DATAset,".csv", sep = ""), sep=",", quote = FALSE)
+
+vsd <- vst(dds, blind = FALSE)
+head(assay(vsd), 3)
+
+# effect of transformation
+dds <- estimateSizeFactors(dds)
+
+df <- bind_rows(
+  as_data_frame(log2(counts(dds, normalized=TRUE)[, 1:2]+1)) %>%
+         mutate(transformation = "log2(x + 1)"),
+  as_data_frame(assay(rld)[, 1:2]) %>% mutate(transformation = "rlog"),
+  as_data_frame(assay(vsd)[, 1:2]) %>% mutate(transformation = "vst"))
+  
+colnames(df)[1:2] <- c("x", "y")  
+
+pdf("DESeq2_transformed_counts.pdf", h=8.5, w=11)
+ggplot(df, aes(x = x, y = y)) + geom_hex(bins = 80) +
+  coord_fixed() + facet_grid( . ~ transformation)  
+dev.off()
+#
+
+# Plot Normalized Counts & rlog 
+par(mfrow = c( 1, 2 ))
+pdf("DESeq2_norm_rlog.pdf", h=8.5, w=11)
+plot(log2( 1+counts(dds, normalized=TRUE)[, 1:2] ), pch=20, cex=0.3)
+plot(assay(rld)[, 1:2], pch=20, cex=0.3)
+dev.off()
+
+# Sample Distances - Overall similarity between samples
+sampleDists <- dist(t( assay(rld)))
+sampleDists
+sampleDistMatrix <- as.matrix(sampleDists)
+#rownames(sampleDistMatrix) <- paste(rld$Genotype, rld$ID, sep="_")
+rownames(sampleDistMatrix) <- paste(rld$Sam.ID)
+#colnames(sampleDistMatrix) <- paste(res$symbol)
+colours = colorRampPalette(rev(brewer.pal(9, "Blues")))(255)
+pdf("DESeq2_heatmap.pdf", h=8.5, w=11.5)
+heatmap.2(sampleDistMatrix, margins = c(8,8),trace="none", col=colours)
+dev.off()
+
+# PCA
+pcaData <- plotPCA(rld, intgroup = c("Genotype", "Treat"), returnData = TRUE)
+
+pcaData
+write.table(pcaData, file = "DESeq2_PCA_data.csv", sep = ",", quote = FALSE, row.names = F)
+
+percentVar <- round(100 * attr(pcaData, "percentVar"))
+
+pdf("DESeq2_PCAplot.pdf", h=8.5, w=11)
+ggplot(pcaData, aes(x = PC1, y = PC2, color = Genotype, shape = Treat)) +
+  geom_point(size =3) +
+  xlab(paste0("PC1: ", percentVar[1], "% variance")) +
+  ylab(paste0("PC2: ", percentVar[2], "% variance")) +
+  coord_fixed()
+dev.off()
+
+# MDS (multidimensional scaling)
+mds <- as.data.frame(colData(rld))  %>% cbind(cmdscale(sampleDistMatrix))
+
+pdf("DESeq2_MDSplot.pdf", h=8.5, w=11)
+ggplot(mds, aes(x = `1`, y = `2`, color = Genotype, shape = Treat)) + geom_point(size = 3) + coord_fixed()
+dev.off()
+
+# MDS plot using rlog-transformed values (PoissonDistance) #samplePoisDistMatrix
+mdsPois <- as.data.frame(colData(dds)) %>% cbind(cmdscale(sampleDistMatrix))
+pdf("DESeq2_rlog_MDSplot.pdf", h=8.5, w=11)
+ggplot(mdsPois, aes(x = `1`, y = `2`, color = Genotype, shape = Treat)) + geom_point(size = 3) + coord_fixed()
+dev.off()
+
+```
+# Differential Expression w DESeq2
+```{r}
+### using the previous model defined 2 sections above. There are several different 
+### choices in the DESeq function. using default settings to start. 
+dds <- DESeq(dds)
+
+# check results objects
+resultsNames(dds)
+#[1] "Intercept"
+#[2] "Sex_M_vs_F"
+#[3] "Treat_y_vs_n"
+#[4] "Genotype_CC027_vs_B6J"
+
+# Call results with no args extracts log2 fold changes & p values
+#res <- results(dds, list(c("Treat_y_vs_n")))
+#res <- results(dds, list(c("Sex_M_vs_F")))
+res <- results(dds, list(c("Genotype_CC027_vs_B6J")))
+
+# label output files
+RESULTset = "test"
+
+# res metadata
+mcols(res, use.names=TRUE)
+
+# order results by padj value (most significant to least)
+res <- res[order(res$padj),]
+
+# save data results and normalized reads to csv
+resdata <- merge(as.data.frame(res), as.data.frame(counts(dds,normalized =TRUE)), by = 'row.names', sort = FALSE)
+# add gene as first col
+names(resdata)[1] <- 'gene'
+# output subset of padj
+write.table(resdata, file = paste("DESeq2_Normalized_results_",RESULTset,".csv", sep = ""), sep = ",", quote = FALSE, row.names = F)
+
+
+# csv
+write.table(as.data.frame(counts(dds),normalized=T), file = paste("DESeq2_Normalized_Counts_",RESULTset,".csv", sep = ""), sep = ",", row.names = T)
+
+head(res)
+summary(res)
+
+### Add gene names with biomaRt. Doesn't seem to work...
+# mmusculus_gene_ensembl Mus musculus genes (GRCm38.p4) GRCm38.p4
+res$ensembl <- sapply(strsplit(rownames(res), split="\\+" ), "[", 1)
+####maybe hash out next line with ensembl...
+ensembl = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+#attributes = listAttributes(ensembl)
+#attributes[1:100,]
+genemap <- getBM(attributes = c("external_gene_name","ensembl_gene_id"), filters = "ensembl_gene_id", values = res$ensembl, mart = ensembl)
+
+idx <- match(res$ensembl, genemap$ensembl_gene_id)
+res$ensembl_gene_id <- genemap$ensembl_gene_id[ idx ]
+res$gene_name <- genemap$external_gene_name[ idx ]
+
+# Check gene IDs
+head(res,4)
+
+## Export Annotated results to csv
+write.table(res, file = paste("DESeq2_filter_results_",RESULTset,".csv", sep = ""), sep=",", quote = FALSE, row.names = TRUE)
+
+```
+
+# Ploting results
+```{r}
+### Volcano3 w/ ggplot2
+##Highlight genes that have an absolute fold change > 2 and a padj < 0.01
+res$threshold = as.factor(abs(res$log2FoldChange) > 1 & res$padj < 0.01)
+res$log10padj = -log10(res$padj)
+dat<-data.frame(cbind(res$log2FoldChange, res$log10padj, res$threshold ) )
+colnames(dat)<-c("log2FoldChange", "log10padj", "threshold")
+##Construct the plot 
+pdf("DESeq2_volcanoplot_treatment.pdf", h=8.5, w=11)
+ggplot(data=dat, aes_string(x="log2FoldChange", y="log10padj", colour="threshold")) +
+  geom_point(alpha=0.4, size=1.75) +
+  theme(legend.position = "none") +
+  xlim(c(-2.5, 2.5)) + ylim(c(0, 8)) +
+  xlab("log2 fold change") + ylab("-log10 p-value")
+dev.off()
+
+## Independent filtering
+# create bins using the quantile function
+qs <- c(0, quantile(res$baseMean[res$baseMean > 0], 0:7/7))
+# "cut" the genes into the bins
+bins <- cut(res$baseMean, qs)
+# rename the levels of the bins using the middle point
+levels(bins) <- paste0("~",round(.5*qs[-1] + .5*qs[-length(qs)]))
+# calculate the ratio of ?p? values less than .01 for each bin
+ratios <- tapply(res$pvalue, bins, function(p) mean( p < .01, na.rm=TRUE))
+# plot these ratios
+pdf("DESeq2_Ratios_barplot.pdf", h=8.5, w=11)
+barplot(ratios, xlab="mean normalized count", ylab="ratio of small $p$ values")
+dev.off()
+
+# Counts plot
+topGene <- rownames(res)[which.min(res$padj)]
+pdf("DESeq2_topGene_counts.pdf", h=8.5, w=11)
+plotCounts(dds, gene = topGene, intgroup=c("Treat"))
+dev.off()
+
+# Normalized counts for a single gene over treatment group
+geneCounts <- plotCounts(dds, gene = topGene, intgroup = c("Genotype","Treat"), returnData = TRUE)
+pdf("DESeq2_norm_group_topGene_counts.pdf", h=8.5, w=11)
+ggplot(geneCounts, aes(x = Treat, y = count, color = Genotype)) + scale_y_log10() +  geom_beeswarm(cex = 3)
+dev.off()
+
+```
+# Gene Clustering
+```{r}
+
+# Set number of genes to cluster - i.e. 20
+topVarGenes <- head(order(rowVars(assay(rld)), decreasing=TRUE ), 20)
+
+# Add gene symbols instead of ensembl name
+mat <- assay(rld)[ topVarGenes, ]
+write.table(row.names(mat), file = "DESeq2_topVarGeneslist_POE_POOL.csv", sep=",", quote = FALSE, row.names = F)
+topID <- read.csv("DESeq2_topVarGeneslist_POE_POOL.csv")
+res.matrix <- as.matrix(res)
+topSym <- res.matrix[ rownames(res.matrix) %in% (topID$ID), ]
+write.table(topSym, file = "DESeq2_topVarGenes_POE_POOL.csv", sep=",", quote = FALSE, row.names = T)
+
+# Clustering
+pdf("DESeq2_clustering.pdf", h=8.5, w=11)
+heatmap.2(assay(rld)[topVarGenes,], key = FALSE, scale="row", trace="none",margins = c(13, 13), dendrogram="column",
+col = colorRampPalette(rev(brewer.pal(9, "RdBu")))(255))
+dev.off()
+
+```
+# Exporting results
+```{r}
+
+res100 <- as.data.frame(res)[1:100, ]
+write.table(res, file = "DESeq2_res100_POE_POOL.csv", sep=",", quote = FALSE, row.names = T)
+
+htmlRep <- HTMLReport(shortName="report", title="My report", reportDirectory="./report")
+publish(res100, htmlRep)
+url <- finish(htmlRep)
+browseURL(url)
+
+```
