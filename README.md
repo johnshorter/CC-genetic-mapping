@@ -1,7 +1,8 @@
-# genetic-mapping
+# Overview
 
-Genetic mapping using the Collaborative Cross founder probability files for a simple trait. This example uses publicially available genotype data found on http://csbio.unc.edu/CCstatus/index.py?run=FounderProbs and publically available phenotype data found on http://csbio.unc.edu/CCstatus/index.py?run=availableLines as of September 2019. 
+Genetic mapping using the Collaborative Cross founder probability files for a simple trait. This example uses publically available genotype data found on http://csbio.unc.edu/CCstatus/index.py?run=FounderProbs and publically available phenotype data found on http://csbio.unc.edu/CCstatus/index.py?run=availableLines as of September 2019. 
 
+# Files needed to run this example
 The file CC_mapping_example.Rmd contain the R code for a QTL analysis, as well as steps for building a probability array, estimating heritability, and doing an association analysis. 
 
 The phenotype file is CC_color.csv
