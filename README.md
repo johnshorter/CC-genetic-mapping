@@ -7,7 +7,7 @@ The file CC_mapping_example.Rmd contain the R code for a QTL analysis, as well a
 
 The phenotype file is CC_color.csv
 
-The map file is fixedmap.csv
+The map file is fixedmap.csv  This is a "fixed" map file that removes bad markers from GigaMUGA genotyping of the MRCAs.
 
 The files MRCAlist.csv and MRCAlist2.csv are the samples that I used to build the 36-state probability array and collapse into an 8-state for the QTL analysis. These names and CC mice may change over time.
 
