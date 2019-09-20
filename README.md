@@ -10,3 +10,6 @@ The phenotype file is CC_color.csv
 The map file is fixedmap.csv
 
 The files MRCAlist.csv and MRCAlist2.csv are the samples that I used to build the 36-state probability array and collapse into an 8-state for the QTL analysis. These names and CC mice may change over time.
+
+The 8-state probability that I created can be found in my personal google drive folder.
+https://drive.google.com/open?id=1SYPfUOp_DQ-2SIsIGhRrRIaRUeNWkIsy
