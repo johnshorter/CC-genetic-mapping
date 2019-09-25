@@ -5,8 +5,10 @@ date: "June 13, 2019"
 output: html_document
 ---
 
+#set up the working directory
 ```{r setup, include=FALSE}
-setwd("C:/Users/John/Desktop/mapping")
+dir.home <- "C:/Users/John/Desktop/mapping"
+
 ```
 
 ```{r}
@@ -25,12 +27,34 @@ library(qtl2convert)
 
 
 ```{r}
-#Collapse into 8 state. Only need to do once!!
-##Pull from http://csbio.unc.edu/CCstatus/index.py?run=FounderProbs
-##mine live here as files in a directory, MRCAlist.csv is just the names of those files
-setwd("~/Desktop/JohnS/probextant/MRCA")
+#don't have DOQTL?
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("DOQTL")
+
+##Don't have argyle or mouser packages?
+library(devtools)
+install_github("andrewparkermorgan/argyle")
+install.packages("remotes")
+remotes::install_github("andrewparkermorgan/mouser")
+
+install.packages("qtl2convert", repos="http://rqtl.org/qtl2cran")
+
+```
+
+
+```{r}
+#Collapse the 36 state files into 8 state. This will add new files into your directory.
+
+##Only need to do once! 
+
+#36-state model is not appropiate for QTL analysis in CC mice.
+
+##Pull 30-state files of the MRCAs from http://csbio.unc.edu/CCstatus/index.py?run=FounderProbs
+##My files are in a directory, MRCAlist.csv is just the names of those MRCA files
+setwd(dir.home)
 sam<-scan("MRCAlist.csv", what="list", quote=NULL)
-for (i in sam) {
+  for (i in sam) {
   hap36<-read.csv(i)
   hap8<-hap36[,1:3]
   AA<-hap36$AA+(hap36$AB/2)+(hap36$AC/2)+(hap36$AD/2)+(hap36$AE/2)+(hap36$AF/2)+(hap36$AG/2)+(hap36$AH/2)
@@ -42,21 +66,22 @@ for (i in sam) {
   GG<-hap36$GG+(hap36$AG/2)+(hap36$BG/2)+(hap36$CG/2)+(hap36$DG/2)+(hap36$EG/2)+(hap36$FG/2)+(hap36$GH/2)
   HH<-hap36$HH+(hap36$AH/2)+(hap36$BH/2)+(hap36$CH/2)+(hap36$DH/2)+(hap36$EH/2)+(hap36$FH/2)+(hap36$GH/2)
   hap8<-cbind(hap8, AA, BB, CC, DD, EE, FF, GG, HH)
-  write.csv(hap8, file=paste("8", i, sep="_"), row.names=FALSE)
+  #write.csv(hap8, file=paste("8", i, sep="_"), row.names=FALSE)
+  write.csv(hap8, file=file.path(dir.home, paste("8", i, sep="_")), row.names=FALSE)
   rm(hap8)
   rm(hap36)
-  
 }
 
 
 ```
 
 ```{r}
+setwd(dir.home)
 #Creating the prob array. Only need to do once!
 Sam.List<-scan("MRCAlist2.csv", what="list", quote=NULL)
 
 dat1<-read.csv("8_CC001-Uncb38V01.csv")
-Snp.Info<-dat1[,1:3]
+Snp.Info <-dat1[,1:3]
 g.Info<-dat1[,4:11]
 gT1<-t(g.Info)
 
@@ -84,15 +109,9 @@ dimnames(y)[[3]] <- unlist(markers)
 ```
 
 ```{r}
-#Alternatively, you can download the probability file I created.
-
-#https://drive.google.com/file/d/1SYPfUOp_DQ-2SIsIGhRrRIaRUeNWkIsy/view?usp=sharing
-
-```
-
-```{r}
-#check to see if number of markers, haps, and samples are correct
+#check to see if number of markers, haplotypes, and samples are correct. I see num [1:78, 1:8, 1:76689]
 str(y)
+
 #is the haplotype frequency correct? F and G are lower in the CC
 freqsy <- apply(y, c(1,2), mean)
 colMeans(freqsy)
@@ -101,11 +120,11 @@ colMeans(freqsy)
 
 ```{r}
 ##traitmapping with CC_color data
-color <- read.csv("~/Desktop/JohnS/probextant/CC_color.csv")
+color <- read.csv(file.path(dir.home,"CC_color.csv"))
 rownames(color) <- color$sample
 
 #using the "fixed map" which removes markers with wrong frequency (chr5 and chr13)
-GIGA_snps <- read.csv("~/Desktop/JohnS/probextant/MRCA/fixedmap.csv")
+GIGA_snps <- read.csv(file.path(dir.home,"fixedmap.csv"))
 
 ```
 
@@ -124,13 +143,13 @@ rownames(pheno) <- color$sample
 kinshiploco <- calc_kinship(probsy, type = c("loco"), use_allele_probs=FALSE)
 kinshipoverall <- calc_kinship(probsy, type = c("overall"), use_allele_probs=FALSE)
 
-#How heritible is the trait? Can't use LOCO kinship, only overall kinship (0.87)
+#How heritible is the trait? Can't use LOCO kinship, only overall kinship. I see 0.87 for my example.
 est_herit(pheno, kinship = kinshipoverall)
 ```
 
 ```{r}
 
-#this is the qtl mapping function.
+#this is the qtl mapping function. See the scan1 function for help on other options, like covariates.
 out <- scan1(probsy, pheno=pheno, kinship = kinshiploco)
 
 #Need to change map to rqtl2 friendly version for plotting qtl and allelic effects
@@ -141,7 +160,8 @@ plot(out, map, lodcolumn=1, col="slateblue")
 ```
 
 ```{r}
-#scan1blup is the way to show allelic effects. Specify what chromosome you whant to see.
+
+#scan1blup is the way to show allelic effects. Specify what chromosome you whant to see. I choose 7 because it has the most significant QTL
 blup2 <- scan1blup(probsy[,"7"], pheno = pheno)
 plot_coefCC(x = blup2, map=map, scan1_output = out, add = FALSE,  gap = NULL, top_panel_prop = 0.6, legend ="topleft")
 
@@ -151,7 +171,7 @@ plot_coefCC(x = blup2, map=map, scan1_output = out, add = FALSE,  gap = NULL, to
 #Permutation is how we determine significance. I would recommend using at least 1000, however it can take a long time, so for this example I am using 50.
 perms = scan1perm(genoprobs= probsy, pheno= pheno, n_perm = 50)
 
-#What is the distribution?
+#What is the distribution of the permutations? Should be normal.
 hist(perms)
 ```
 
@@ -160,9 +180,8 @@ hist(perms)
 thr = summary(perms)
 thr
 
-#this can be added (manually) to our genomewide QTL plot using abline
-plot(out, map, lodcolumn=1, col="slateblue")
-abline(h=8.05, col="red")
+#this can be added (manually) to our genomewide QTL plot using abline. Enter your own value for h=
+plot(out, map, lodcolumn=1, col="slateblue") + abline(h=8.05, col="red")
 ```
 
 ```{r}
@@ -177,9 +196,11 @@ end <- peaks$ci_hi
 
 ```{r}
 #We can do assoc mapping by plotting variants of the eight founder strains using sanger's sequence. The variants file is quite large.
-#pull variant file from here: https://figshare.com/articles/SQLite_database_of_variants_in_Collaborative_Cross_founder_mouse_strains/5280229/2
 
-db <- dbConnect(SQLite(), "~/Downloads/cc_variants.sqlite")
+#pull variant file from here: 
+#https://figshare.com/articles/SQLite_database_of_variants_in_Collaborative_Cross_founder_mouse_strains/5280229/2
+
+db <- dbConnect(SQLite(), file.path(dir.home,"cc_variants.sqlite"))
 query_variants <- create_variant_query_func(db=db)
 
 
@@ -191,42 +212,36 @@ plot_snpasso(assoc$lod, assoc$snpinfo)
 
 ```{r}
 #We can also plot genes in our association mapping plot.
-#pull gene file from here: https://figshare.com/articles/SQLite_database_with_MGI_mouse_gene_annotations_from_Mouse_Genome_Informatics_MGI_at_The_Jackson_Laboratory/5286019/5
+#pull gene file from here: 
+#https://figshare.com/articles/SQLite_database_with_MGI_mouse_gene_annotations_from_Mouse_Genome_Informatics_MGI_at_The_Jackson_Laboratory/5286019/5
 
-query_genes <- create_gene_query_func("C:/Users/John/Desktop/mapping/data/mouse_genes_mgi.sqlite")
+query_genes <- create_gene_query_func(file.path(dir.home,"mouse_genes_mgi.sqlite"))
 
 genes <- query_genes(chr = chr, start = start, end = end)
 
 plot_snpasso(assoc$lod, assoc$snpinfo, genes = genes, top_panel_prop = 0.5)
+
+
+##This peak maps close to the Tyr gene, which is known to control the ablino coat color
+##https://www.ncbi.nlm.nih.gov/pubmed/24879364?dopt=Abstract
+
+
 ```
 
 
 
 
 
-
-```{r}
-#don't have DOQTL??
-if (!requireNamespace("BiocManager", quietly = TRUE))
-  install.packages("BiocManager")
-BiocManager::install("DOQTL")
-
-##Don't have argyle or mouser packages? go here
-library(devtools)
-install_github("andrewparkermorgan/argyle")
-install.packages("remotes")
-remotes::install_github("andrewparkermorgan/mouser")
-
-install.packages("qtl2convert", repos="http://rqtl.org/qtl2cran")
-
-```
 
 ```{r}
 
 library(argyle)
 library(mouser)
 
-###Sanity check. Does the frequency make sense? For b38 it does not at chr5 and chr13!
+###Sanity check. Does the frequency make sense? The following code checks for odd spikes in the frequency of the 8 haplotypes.
+
+#For MRCAs in b38, we see large spikes on chromosomes 5 and 13. These spikes suggest the markers are not correct. This is why I used a fixed map file, which removes these bad markers. 
+
 ## load SNP positions
 colnames(Snp.Info) <- c("marker", "chr", "pos")
 
@@ -240,13 +255,15 @@ colnames(freqs2)[1:2] <- c("strain","marker")
 ## add SNP positions
 freqs2 <- merge(freqs2, Snp.Info, all.x = TRUE)
 
-## make the plot
+## make the plot. We use yintercept = 0.125 because 12.5 is the expected frequency (1/8).
 ggmanhattan(freqs2) +
   geom_line(aes(y = freq, colour = strain, group = strain:chr)) +
   geom_hline(yintercept = 0.125, lty = "dashed", colour = "darkgrey") +
+  geom_hline(yintercept = 0.0, lty = "solid", colour = "black") +
   scale_y_continuous("allele frequency\n") +
   scale_color_CC() +
   facet_grid(strain ~ .) +
   theme_classic() +
   theme(axis.title.x = element_blank())
+
 ```
